@@ -4,7 +4,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.settings import settings
 from app.db.session import get_session
-from app.core.security import hash_password
+from app.core.security import hash_password, verify_password 
+from app.core.jwt import create_access_token, create_refresh_token     # <-- add
+from app.schemas.auth import SignupIn, UserOut, LoginIn, TokenPair
 from app.schemas.auth import SignupIn, UserOut
 from app.models import User
 
@@ -46,3 +48,16 @@ async def auth_signup(payload: SignupIn, session: AsyncSession = Depends(get_ses
         verified=user.verified,
         created_at=user.created_at,
     )
+
+
+@app.post("/auth/login", response_model=TokenPair)
+async def auth_login(payload: LoginIn, session: AsyncSession = Depends(get_session)):
+    result = await session.execute(select(User).where(User.email == payload.email))
+    user = result.scalar_one_or_none()
+    if not user or not verify_password(payload.password, user.password_hash):
+        # same message for both cases to avoid leaking which part failed
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    access = create_access_token(user_id=user.id, email=user.email)
+    refresh = create_refresh_token(user_id=user.id)
+    return TokenPair(access_token=access, refresh_token=refresh)
