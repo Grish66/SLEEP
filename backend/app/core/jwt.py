@@ -1,8 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
-
+from jwt import InvalidTokenError
 import jwt
-
 from app.core.settings import settings
 
 
@@ -32,3 +31,18 @@ def create_refresh_token(user_id: int) -> str:
     payload = _base_payload(user_id)
     payload.update({"type": "refresh", "exp": exp})
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_alg)
+
+
+def decode_token(token: str, expected_type: str | None = None) -> dict:
+    """
+    Decode & verify a JWT. Optionally enforce token 'type' (e.g., 'access' or 'refresh').
+    Raises jwt.InvalidTokenError if verification fails.
+    """
+    # Verify signature & standard claims (exp, iat, nbf)
+    payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_alg])
+
+    # Optionally enforce expected type
+    if expected_type is not None and payload.get("type") != expected_type:
+        raise InvalidTokenError(f"Unexpected token type: {payload.get('type')!r}")
+
+    return payload
