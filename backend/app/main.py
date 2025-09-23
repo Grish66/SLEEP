@@ -10,6 +10,12 @@ from app.schemas.auth import SignupIn, UserOut, LoginIn, TokenPair
 from app.schemas.auth import SignupIn, UserOut
 from app.models import User
 
+from app.deps.auth import get_current_user_claims 
+
+from app.core.jwt import create_access_token, create_refresh_token, decode_token
+from app.schemas.auth import SignupIn, UserOut, LoginIn, TokenPair, RefreshIn, AccessTokenOut
+
+
 app = FastAPI(title=settings.app_name)
 
 @app.get("/healthz")
@@ -61,3 +67,33 @@ async def auth_login(payload: LoginIn, session: AsyncSession = Depends(get_sessi
     access = create_access_token(user_id=user.id, email=user.email)
     refresh = create_refresh_token(user_id=user.id)
     return TokenPair(access_token=access, refresh_token=refresh)
+
+
+@app.get("/me")
+async def read_me(claims: dict = Depends(get_current_user_claims)):
+    """
+    Example protected route. Requires Authorization: Bearer <access_token>
+    """
+    return {"user_id": claims["user_id"], "email": claims["email"]}
+
+
+
+@app.post("/auth/refresh", response_model=AccessTokenOut)
+async def auth_refresh(payload: RefreshIn, session: AsyncSession = Depends(get_session)):
+    # 1) Verify the refresh token and read its subject (user id)
+    try:
+        data = decode_token(payload.refresh_token, expected_type="refresh")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    user_id = int(data["sub"])
+
+    # 2) (Optional) fetch email so new access token includes it
+    result = await session.execute(select(User.email).where(User.id == user_id))
+    email = result.scalar_one_or_none()
+    if not email:
+        raise HTTPException(status_code=401, detail="Invalid token subject")
+
+    # 3) Issue a fresh access token
+    new_access = create_access_token(user_id=user_id, email=email)
+    return AccessTokenOut(access_token=new_access)
