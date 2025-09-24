@@ -15,6 +15,10 @@ from app.deps.auth import get_current_user_claims
 from app.core.jwt import create_access_token, create_refresh_token, decode_token
 from app.schemas.auth import SignupIn, UserOut, LoginIn, TokenPair, RefreshIn, AccessTokenOut
 
+from app.schemas.note import NoteCreate, NoteOut
+from app.models import Note
+
+
 
 app = FastAPI(title=settings.app_name)
 
@@ -97,3 +101,34 @@ async def auth_refresh(payload: RefreshIn, session: AsyncSession = Depends(get_s
     # 3) Issue a fresh access token
     new_access = create_access_token(user_id=user_id, email=email)
     return AccessTokenOut(access_token=new_access)
+
+
+@app.post("/notes", response_model=NoteOut, status_code=201)
+async def create_note(
+    payload: NoteCreate,
+    claims: dict = Depends(get_current_user_claims),
+    session: AsyncSession = Depends(get_session),
+):
+    note = Note(
+        user_id=claims["user_id"],
+        title=payload.title,
+        body=payload.body,
+        done=payload.done,
+    )
+    session.add(note)
+    await session.flush()
+    await session.commit()
+    await session.refresh(note)
+    return NoteOut(id=note.id, title=note.title, body=note.body, done=note.done)
+
+
+@app.get("/notes", response_model=list[NoteOut])
+async def list_notes(
+    claims: dict = Depends(get_current_user_claims),
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.execute(
+        select(Note).where(Note.user_id == claims["user_id"]).order_by(Note.id.desc())
+    )
+    notes = result.scalars().all()
+    return [NoteOut(id=n.id, title=n.title, body=n.body, done=n.done) for n in notes]
