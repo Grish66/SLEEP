@@ -15,8 +15,9 @@ from app.deps.auth import get_current_user_claims
 from app.core.jwt import create_access_token, create_refresh_token, decode_token
 from app.schemas.auth import SignupIn, UserOut, LoginIn, TokenPair, RefreshIn, AccessTokenOut
 
-from app.schemas.note import NoteCreate, NoteOut
+from app.schemas.note import NoteCreate, NoteOut, NoteUpdate
 from app.models import Note
+
 
 
 
@@ -122,13 +123,57 @@ async def create_note(
     return NoteOut(id=note.id, title=note.title, body=note.body, done=note.done)
 
 
-@app.get("/notes", response_model=list[NoteOut])
-async def list_notes(
+@app.get("/notes/{note_id}", response_model=NoteOut)
+async def get_note(
+    note_id: int,
     claims: dict = Depends(get_current_user_claims),
     session: AsyncSession = Depends(get_session),
 ):
     result = await session.execute(
-        select(Note).where(Note.user_id == claims["user_id"]).order_by(Note.id.desc())
+        select(Note).where(Note.id == note_id, Note.user_id == claims["user_id"])
     )
-    notes = result.scalars().all()
-    return [NoteOut(id=n.id, title=n.title, body=n.body, done=n.done) for n in notes]
+    note = result.scalar_one_or_none()
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    return NoteOut(id=note.id, title=note.title, body=note.body, done=note.done)
+
+
+@app.put("/notes/{note_id}", response_model=NoteOut)
+async def update_note(
+    note_id: int,
+    payload: NoteUpdate,
+    claims: dict = Depends(get_current_user_claims),
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.execute(
+        select(Note).where(Note.id == note_id, Note.user_id == claims["user_id"])
+    )
+    note = result.scalar_one_or_none()
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+
+    data = payload.model_dump(exclude_unset=True)
+    for k, v in data.items():
+        setattr(note, k, v)
+
+    await session.commit()
+    await session.refresh(note)
+    return NoteOut(id=note.id, title=note.title, body=note.body, done=note.done)
+
+
+@app.delete("/notes/{note_id}", status_code=204)
+async def delete_note(
+    note_id: int,
+    claims: dict = Depends(get_current_user_claims),
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.execute(
+        select(Note).where(Note.id == note_id, Note.user_id == claims["user_id"])
+    )
+    note = result.scalar_one_or_none()
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+
+    await session.delete(note)
+    await session.commit()
+    return  # 204 No Content
