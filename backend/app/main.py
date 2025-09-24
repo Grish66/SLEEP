@@ -9,14 +9,14 @@ from app.core.jwt import create_access_token, create_refresh_token     # <-- add
 from app.schemas.auth import SignupIn, UserOut, LoginIn, TokenPair
 from app.schemas.auth import SignupIn, UserOut
 from app.models import User
-
 from app.deps.auth import get_current_user_claims 
-
 from app.core.jwt import create_access_token, create_refresh_token, decode_token
 from app.schemas.auth import SignupIn, UserOut, LoginIn, TokenPair, RefreshIn, AccessTokenOut
-
 from app.schemas.note import NoteCreate, NoteOut, NoteUpdate
 from app.models import Note
+from app.schemas.prefs import PrefsOut, PrefsUpdate
+from app.models import UserPref
+
 
 
 
@@ -177,3 +177,45 @@ async def delete_note(
     await session.delete(note)
     await session.commit()
     return  # 204 No Content
+
+
+
+@app.get("/me/prefs", response_model=PrefsOut)
+async def get_my_prefs(
+    claims: dict = Depends(get_current_user_claims),
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.execute(
+        select(UserPref).where(UserPref.user_id == claims["user_id"])
+    )
+    prefs = result.scalar_one_or_none()
+    if not prefs:
+        # auto-create with model default (20)
+        prefs = UserPref(user_id=claims["user_id"])
+        session.add(prefs)
+        await session.flush()
+        await session.commit()
+        await session.refresh(prefs)
+    return PrefsOut(sleep_minutes=prefs.sleep_minutes)
+
+
+@app.put("/me/prefs", response_model=PrefsOut)
+async def update_my_prefs(
+    payload: PrefsUpdate,
+    claims: dict = Depends(get_current_user_claims),
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.execute(
+        select(UserPref).where(UserPref.user_id == claims["user_id"])
+    )
+    prefs = result.scalar_one_or_none()
+    if not prefs:
+        prefs = UserPref(user_id=claims["user_id"], sleep_minutes=payload.sleep_minutes)
+        session.add(prefs)
+    else:
+        prefs.sleep_minutes = payload.sleep_minutes
+
+    await session.commit()
+    await session.refresh(prefs)
+    return PrefsOut(sleep_minutes=prefs.sleep_minutes)
+    
